@@ -8,5 +8,5 @@ This repository containes portfolio of my data science projects completed by me 
 Sentiment Analysis for COVID-19 
 - Sentiment analysis for COVID-19 tweets across the world and in the United States. Technologies used: R
 
-Analysis of an eCommerce Store 
+[Analysis of an eCommerce Store ](https://github.com/quinteandy/portfolio/blob/main/GA%20Using%20R.nb.html)
 - In this project, I did an analysis of an ecommerce store that sells Google branded merchandise. I created linear models to make sure that the relationship between input and output variables are approximately linear. Technologies used: Google Analytics, Data Studio, Big Query, and R
