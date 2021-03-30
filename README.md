@@ -2,7 +2,7 @@
 
 This repository containes portfolio of my data science projects completed by me for academic, self learning, and hobby purposes. Presented in the form of Python (Jupiter Notebooks), and R markdown files.
 
-Sentiment Analysis for Amazon Reviews
+[Sentiment Analysis for Amazon Reviews](https://github.com/quinteandy/portfolio/blob/main/Amazon_Consumer_Reviews.ipynb)
 - Sentiment analysis with Amazon product review data, using Naives Bayes classification, RandomForest and Logistic Regression. Technologies used: Python
 
 Sentiment Analysis for COVID-19 
