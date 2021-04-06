@@ -1,0 +1,651 @@
+---
+title: "GA"
+author: "Andy Quintero"
+output:
+  html_document:
+    df_print: paged
+    code_folding: hide
+---
+
+#### The sample dataset contains obfuscated Google Analytics 360 data from the Google Merchandise Store, a real ecommerce store that sells Google branded merchandise. The dataset was pulled using Google’s BigQuery.
+
+
+
+## Load libraries
+
+## testing r
+
+```{r}
+library(dplyr, warn.conflicts = FALSE) # suppress conflicts warning
+options(dplyr.summarise.inform = FALSE) # Suppress summarise info
+
+library(tidyr)
+library(ggplot2)
+
+# date/time libaray
+library(lubridate, warn.conflicts = FALSE)
+```
+
+
+## Read dataset and show its structure
+
+```{r}
+df<- read.csv(file = "bq-results.csv")
+names(df)
+```
+
+## Transformations
+
+```{r}
+df$userID =  as.character(df$userID)
+df$sessionID =  as.character(df$sessionID)
+
+df$date = as.Date(as.character(df$date), "%Y%m%d")
+df$dow =  wday(df$date) # new column
+
+# replace NA with 0
+df$transactions[is.na(df$transactions)] <- 0 
+df$totalTransactionRevenue[is.na(df$totalTransactionRevenue)] <- 0 
+df$newVisits[is.na(df$newVisits)] <- 0 
+
+# scale
+df$totalTransactionRevenue =df$totalTransactionRevenue/1000000 # scale
+
+# new columns
+df$newVisits =  factor(ifelse(df$newVisits  == 1, 'yes', 'no'))
+df$hasTransaction =  factor(ifelse(df$transactions >= 1, 'yes', 'no')) 
+
+df$hitNumber = NULL;  # not useful
+
+str(df)
+```
+
+#### 281493 observations and 16 variables including new columns
+
+## Top and Bottom
+
+```{r}
+head(df, 10)
+```
+
+```{r}
+tail(df)
+```
+
+#### - Observation 1 and 2 corresponds to 2 users who only visited a single page.
+#### - Observation 3-4 pertain to the same user/session in which the user visited 2 separate pages (pageviews and pagePath) for a given visit.
+#### -However that same user is associated with more than one session as observed by observation 5,6,7, etc..
+
+
+## Summary
+
+#### summarize by distinct sessionID. If we were interested in pagePath, we would need to include userID in our distinct clause.
+
+#### userID SessionID Session PageViews pagePath 
+#### 436683523507380 1500504900 1 2 /home 
+#### 436683523507380 1500504900 1 2 /google+redesign/electronics/power/ 
+
+```{r}
+df %>%
+  distinct(sessionID, .keep_all = TRUE) %>%   # don't double-count
+  select( -c('userID', 'sessionID', 'dow', 'pagePath'))  %>%
+  summary()
+```
+
+#### - dataset pertains to the activity from 7/1/2017 - 8/1/2017 (one months worth of data)
+#### - most of the numeric variables have distributions that are skewed right ( mean > median) due to outliers
+#### - session (user sessions): most are single sessions but there are some outliers with up to 395 sessions
+#### - pageviews: median pages viewed is 3.78 with some outliers with up to 186 pages viewed
+#### - most are new visitors (newVisits) with 0 transactions. The max number of transactions is 4.
+#### - All ‘visits’ (1) resulted in interaction events (eg: downloads, mobile ad clicks, gadgets, etc).
+#### - majority of users use Chrome browser followed by Safari with majority accessing the site from desktop followed by mobile.
+#### - Most users access the site from the US and from CA. There are a high number of unknown country, region origin
+
+
+## more cleaning
+
+```{r}
+df$region <- as.character(df$region)
+df$region[df$region == 'not available in demo dataset'] <- 'unknown'
+df$region[df$region == '(not set)'] <- 'unknown'
+df$region <- as.factor(df$region)
+
+df$country <- as.character(df$country)
+df$country[df$country == '(not set)'] <- 'unknown'
+df$country <- as.factor(df$country)
+```
+
+## The next table shows the top 20 pages visited
+
+```{r}
+df2=df %>%
+  group_by(pagePath) %>%
+  distinct(sessionID, .keep_all = TRUE) %>%   # don't double-count
+  count(pagePath,  sort = TRUE) %>% 
+  head(20)  
+
+df2$pagePath <- factor(df2$pagePath, 
+  levels = df2$pagePath[order( df2$n, decreasing = TRUE)])
+
+df2
+```
+
+#### Here we see the pages visited ranked by frequency
+
+#### - home page most visited which makes sense as this is the site landing page
+#### - youtube video is the next most visited followed by probably shopping cart
+#### - men’s shirts appears to be a popular product
+
+## Visualization
+
+### Univariate plots
+
+#### Most visited Pages
+
+```{r}
+ggplot(df2, aes(x = pagePath, y = n)) +
+    geom_col() +
+    coord_flip() +
+        labs(x = NULL, y = NULL,
+        title = "Top 20 pages visited")
+```
+
+#### Page Views with Transactions
+
+```{r}
+# unique by user ID/ sessionID
+data = df %>%
+  group_by(userID) %>%
+  mutate(converted = ifelse(hasTransaction == 'yes', 1, 0)) %>%
+  distinct(date, userID, sessionID, pageviews, transactions, converted, country, 
+           hasTransaction)
+```
+
+```{r}
+ par(mfrow=c(1,2)) # 1 row, 2 columns
+
+ group_data = filter(data, hasTransaction == 'yes' )  
+ group_data
+```
+
+```{r}
+ qplot(data$pageviews,
+        geom="histogram",
+        binwidth = 5,  
+        main = 'Distribution of page views (All)',
+        xlab = 'page views',  
+        fill=I("blue"), 
+        col=I("blue"), 
+        alpha=I(.2))
+```
+
+```{r}
+  qplot(group_data$pageviews,
+        geom="histogram",
+        binwidth = 5,  
+        main = 'Distribution of page views with Transactions',
+        xlab = 'page views',  
+        fill=I("blue"), 
+        col=I("blue"), 
+        alpha=I(.2))
+```
+
+#### Majority of users view less than 5 pages With transactions, the majority of page views is less than 25
+
+## Density/Box plots for numeric variables
+
+#### data frame of numeric variables of interest
+
+```{r}
+options(width = 400)
+
+ df2 = df %>%
+  distinct(userID, sessionID, .keep_all = TRUE) %>% 
+  select( -c('dow', 'visits')) %>%  # exclude
+  select_if(is.numeric) %>% 
+  arrange(-totalTransactionRevenue) # sort by revenue
+ 
+ head(df2, 10)
+```
+
+```{r}
+ summary (df2)
+```
+
+```{r}
+par(mfrow=c(1,2)) 
+
+cols = colnames(df2)
+for (i in cols) {
+     fieldName =  names(df2[i])
+     title = paste(" ", fieldName)
+     plot(density(df2[[i]]), main=title)  # densitiy plot
+     #hist(df2[[i]], main=title, ylab="Frequency", xlab='') 
+     boxplot(df2[[i]], main =  fieldName) # box plot
+  }
+```
+
+#### - Values are nominal, essentially 0 or close to it.
+#### - Most are right skewed and transactions have multiple peaks.
+
+## Univariate plots
+
+#### Which browsers contribute to transactions? 
+
+```{r}
+grouped_data = df %>%
+  group_by(browser) %>%
+  filter(hasTransaction == 'yes')  %>%
+  distinct(userID, sessionID, transactions, browser)  %>%
+  mutate( total_transactions_per_user = sum(transactions))  %>% 
+  summarise(browser, total_transactions_per_user)  %>% 
+  arrange(-total_transactions_per_user) 
+
+# remove duplicates
+grouped_data = grouped_data[!duplicated(grouped_data), ]
+head(grouped_data, 10)
+```
+
+```{r}
+ggplot(data = grouped_data, 
+  aes(x=reorder(browser, total_transactions_per_user), y = total_transactions_per_user)) +
+  xlab('')  +
+  ylab('Transactions')  +
+  ggtitle('Transactions by browser')+
+  theme(legend.position="none") +
+  geom_bar(stat = "identity", fill='blue')
+```
+
+#### Chrome browser overwhelming contributes to transactions, followed by Safari
+
+#### How do device contribute to Revenue?
+
+```{r}
+# unique by userID and sessionID
+.data = df %>%
+    filter(totalTransactionRevenue > 0)  %>%
+    distinct(userID, sessionID, .keep_all = TRUE)  
+
+.data %>%
+  group_by(deviceCategory) %>%
+  summarise(deviceCategory = deviceCategory, 
+            totalRevenue = sum(totalTransactionRevenue)) %>%
+  distinct(deviceCategory, totalRevenue)  
+```
+
+```{r}
+qplot(data = .data, x=.data$deviceCategory, y=.data$totalTransactionRevenue, 
+      geom = "boxplot", 
+      xlab = '', ylab = '', main = 'Revenue by device',
+      fill= .data$deviceCategory) +
+      scale_y_continuous(trans='log10')  +   # log-scale for easier viewing
+      theme(legend.position = "none",  # no legend
+      plot.title = element_text(hjust = 0.5, face="bold")) # center
+```
+
+#### Here, we see desktop contribute the most to revenue followed by Mobile.
+
+
+## Which countries contribute to transactions?
+
+```{r}
+grouped_data = df %>%
+  group_by(country) %>%
+  filter(hasTransaction == 'yes')  %>%
+  distinct(userID, sessionID, transactions, country)  %>%
+  mutate( total_transactions_per_user = sum(transactions))  %>% 
+  summarise(country, total_transactions_per_user)  %>% 
+  arrange(-total_transactions_per_user) 
+
+# remove duplicates
+grouped_data = grouped_data[!duplicated(grouped_data), ]
+head(grouped_data, 10)
+```
+
+```{r}
+ggplot(data = grouped_data, aes(x=reorder(country, total_transactions_per_user), y=total_transactions_per_user)) +
+  coord_flip() +
+  xlab('')  + ylab('Transactions')  +
+  ggtitle('Transactions by country')+
+  scale_y_continuous(trans='log10')  +   # log-scale for easier viewing
+  theme(legend.position="none") +
+  geom_bar(stat = "identity", fill='blue')
+```
+
+#### Most transactions originate from the US, followed by Canada. The transactions from other countries are nominal in comparison.
+
+
+## How does region contribute to Revenue?
+
+```{r}
+grouped_data = df %>%
+  group_by(region) %>%
+  filter(hasTransaction == 'yes')  %>%
+  distinct(userID, sessionID, totalTransactionRevenue, region)  %>% 
+  mutate( totalrev_per_region = sum(totalTransactionRevenue))  %>% 
+  summarise(region, totalrev_per_region)  %>% 
+  arrange(-totalrev_per_region) 
+
+# remove dups
+grouped_data = grouped_data[!duplicated(grouped_data), ]
+grouped_data
+```
+
+```{r}
+ggplot(data = grouped_data, aes( x=reorder(region, totalrev_per_region), 
+  y = totalrev_per_region)) +
+  coord_flip() +
+  xlab('')  + ylab('Revenue')  +
+  ggtitle('Revenue by Region')+
+  scale_y_continuous(trans='log10')  +   # log-scale for easier viewing
+  theme(legend.position="none") + 
+  geom_bar(stat = "identity", fill='blue')
+```
+
+#### Most revenue comes from the US and from CA followed by NY. There is a large number of revenue with uknown region
+
+
+## What’s the relationship between page views and conversion rate?
+
+```{r}
+#page-views vs conversion_rate
+grouped_data = data %>% 
+  group_by(pageviews) %>% 
+  summarise(conversion_rate=mean(converted))
+
+head(grouped_data, 10)
+```
+
+```{r}
+qplot(x=pageviews, y=conversion_rate, 
+      data=grouped_data, geom="line",
+      main = 'Conversation rate vs page views',
+      xlab = 'page views',
+      ylab = 'convesion rate') 
+```
+
+#### Conversation rate increases linearly with higher page views up to around 50 at which point the trend is a bit random.
+
+
+
+## How are transactions distributed across days of the week?
+
+```{r}
+grouped_data = df %>%
+  group_by(userID) %>%
+  filter(hasTransaction == 'yes')  %>%
+  distinct(date, userID, sessionID, transactions, dow)  %>%
+  mutate( total_transactions_per_user = sum(transactions) ) %>%
+  arrange(-total_transactions_per_user) 
+  
+
+grouped_data$dow <- as.factor(grouped_data$dow )
+head(grouped_data, 10)
+```
+
+```{r}
+grouped_data %>%
+  ggplot( aes(x = dow, y = total_transactions_per_user)) + 
+    ylab('Transactions') + xlab('') +
+    ggtitle("Transactions by Day of Week") +
+    #geom_boxplot() +
+    geom_bar(stat = "identity", show.legend = FALSE) +
+    scale_x_discrete(labels = c('Sun','Mon', 'Tues', 'Wed', 'Thur', 'Fri', 'Sat'))
+```
+
+#### Most transactions occur on Monday and decrease through-out the week with an upward trend on Wed and Thurs before dropping. The weekends show the least amount of transactions
+
+
+#### Session activity by date
+
+```{r}
+cum_sesson_totals = df %>%
+  group_by(date) %>%
+  filter(hasTransaction == 'yes')  %>%
+  distinct(date, userID, sessionID, session)  %>%
+  summarize(total_sessions = sum(session)) 
+
+head(cum_sesson_totals, 10)
+```
+
+```{r}
+ggplot(cum_sesson_totals, aes(x=date, y=total_sessions )) + 
+  geom_line() + 
+  xlab('') + ylab('sessions') + ggtitle("Sessions by Date") +
+  theme(plot.title = element_text(hjust = 0.5)) + # center title
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))  #rotate x-axis
+```
+
+```{r}
+ggplot(cum_sesson_totals, aes(x = date, y = total_sessions) ) + 
+  xlab('') + ylab('sessions') + ggtitle("Sessions by Date") +
+  geom_point() + 
+  geom_smooth() +
+  theme(plot.title = element_text(hjust = 0.5)) + # center title
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+#### Session activity is cyclical through-out the month, corresponding to drops during the weekend, but the overall trend is upward.
+
+## Analysis Questions
+### Note: you may need to create aggregated fields as well as filter to be able to answer the following questions
+
+#### 1) What was the average number of product pageviews for users who made a purchase?
+#### SUM(total_pagesviews_per_user) / COUNT(users) 
+#### Answer: 27.999
+
+```{r}
+df2 = df %>%
+  group_by(userID) %>%
+  filter(hasTransaction == 'yes' )  %>%
+  distinct(userID, sessionID, pageviews)  
+
+head(df2, 10)
+```
+
+```{r}
+# count of unique rows by userID
+total_unique_users = df2 %>%
+   distinct(userID)  %>%
+   nrow()
+
+print('AVG number of product page views for users who made a purchase')
+```
+
+```{r}
+sum(df2$pageviews)/total_unique_users
+```
+
+
+## 2) What was the average number of product pageviews for users who did not make a purchase?
+### Answer: 
+### 4.21
+
+```{r}
+df2 = df %>%
+  group_by(userID) %>%
+  filter(hasTransaction == 'no' )  %>%
+  distinct(userID, sessionID, pageviews)  
+
+head(df2, 10)
+```
+
+```{r}
+# count of unique rows by userID
+total_unique_users = df2 %>%
+   distinct(userID)  %>%
+   nrow()
+
+print('AVG number of product page views for users who made a purchase')
+
+sum(df2$pageviews)/total_unique_users
+```
+
+## 3) What was the average total transactions per user that made a purchase?
+### SUM (total_transactions_per_user) / COUNT(userID) 
+### Answer: 1.117
+
+```{r}
+df2 = df %>%
+  group_by(userID) %>%
+  filter(hasTransaction == 'yes')  %>%
+  distinct(userID, sessionID, transactions)  %>%
+  mutate( total_transactions_per_user = sum(transactions))
+  #head(10)
+  
+head(df2, 10)
+```
+
+```{r}
+# sum unique transactions by user ID
+unique_transactions = df2 %>%
+   distinct(total_transactions_per_user)
+total_unique_transactions = sum(unique_transactions$total_transactions_per_user)
+
+# count of unique rows by userID
+total_unique_users = df2 %>%
+   distinct(userID)  %>%
+   nrow()
+  
+
+print('AVG total transactions per user that made a purchase')
+
+total_unique_transactions / total_unique_users
+```
+
+
+## 4) What is the average amount of money spent per session?
+#### SUM(total_transactionrevenue_per_user) / SUM(total_visits_per_user) 
+
+#### Answer: 157.9421 (eg: 157942141/1000000)
+
+```{r}
+df2 = df %>%
+  group_by(userID,  visits, totalTransactionRevenue) %>%
+  filter(hasTransaction == 'yes' & totalTransactionRevenue > 0)  %>%
+  distinct(userID, totalTransactionRevenue, pageviews)  
+  #summarise(userID, totalTransactionRevenue, pageviews) 
+
+head(df2, 10)
+```
+
+```{r}
+print('AVG  amount of money spent per session')
+
+sum(df2$totalTransactionRevenue)/ sum(df2$visits)
+```
+
+#### 5) What is the total number of transactions generated per browser type?
+
+```{r}
+df2=df %>%
+  group_by(browser) %>%
+  #filter(hasTransaction == 'yes')  %>%
+  distinct(userID, sessionID, transactions, browser)  %>%
+  mutate( total_transactions_per_user = sum(transactions))  %>% 
+  summarise(browser, total_transactions_per_user)  %>% 
+  arrange(-total_transactions_per_user) 
+
+df2 = df2[!duplicated(df2), ]
+df2
+```
+
+## Regression Models
+
+#### Normal Distribution assumption
+
+#### For linear and logistic regression, we ideally want to make sure that the relationship between input and output variables are approximately linear.
+
+```{r}
+df2 = df %>%
+  group_by(session) %>%
+  filter( totalTransactionRevenue > 0)   %>%
+  distinct(userID, sessionID, pageviews, transactions, totalTransactionRevenue, 
+           dow, deviceCategory, region)
+
+df2 %>%
+  select(-c(userID, sessionID, dow, deviceCategory, region))  %>%
+  summary()
+```
+
+#### Statistics reveals median revenue of 49 while mean is 158, again an indication of positive skew. This is not too surprising in that monetary values (eg: incomes, customer value, purchase sizes) are common sources of skewed distributions.
+
+#### Monetary amounts are often lognormally distributed (Eg: the log of the data is normally distributed). Hence by taking the log of we can restore symmetry to it, as shown below.
+
+```{r}
+par(mfrow=c(1,2)) 
+
+plot(density(df2$totalTransactionRevenue), main='Original Revenue')  
+
+plot(density(log(df2$totalTransactionRevenue)), main='Logged transformed Revenue')
+```
+
+## Correlation
+
+```{r}
+library(corrplot)
+
+data = df2 %>%
+  mutate(revenue = log(totalTransactionRevenue))  %>%
+  select(-c(userID, sessionID, totalTransactionRevenue))  
+  
+M <- cor(data[,c('session', 'pageviews', 'transactions', 'revenue')])
+print(M)
+```
+
+```{r}
+corrplot(M, method="number")
+```
+
+### None of the input variables are strongly correlated to revenue, though page views (0.26) has the strongest correlation
+
+## Multiple Linear regression model (Revenue Predicting)
+
+```{r}
+model1<-lm(revenue ~ ., data)
+summary (model1)
+```
+
+#### We can see that region and dow are not significant so lets create another model without these
+
+```{r}
+data = data %>% 
+  select(-c(region,dow))
+
+names(data)
+```
+
+```{r}
+model2<-lm(revenue ~ ., data)
+summary (model2)
+```
+
+### All predictor variables are significant and the F-statistic with a very low pvalue is highly significant. The Adjusted R-squared (0.126) indicates that about 13% of Revenue is explained by this model.
+
+#### Equation: 
+#### - Revenue = 2.965028 + 0.026(Session) + 0.016(Pageviews) + 0.621(Transactions) -0.480(Mobile) - 0.471(tablet) 
+#### The intercept (Desktop) base-line is 2.97 which is the average Revenue for Desktop devices. But the the average revenue for Mobile is -0.480 units lower while Tablet is -0.471 units lower. For each 1 unit increase in sessions the predicted increase in Revenue is 0.026. For each 1 unit increase in pageviews, the predicted increase in Revenue is 0.0161. For each 1 unit increase in transactions, the predicted increase in Revenue is 0.621.
+
+
+## Model Comparison
+
+```{r}
+#anova(model2, model1, test="LRT") # Likelihood ratio tests
+anova(model2, model1)
+```
+
+#### The p-value for the model that includes Region is not significant. This means the 2 models are not significantly different in terms of model performance. Hence adding the Region does not improve the model.
+
+## Evaluating Model Assumptions
+
+```{r}
+plot(model1)
+```
+
+#### - Fitted vs Residuals plot: is a scatter plot of residuals on the y axis and fitted values (estimated responses) on the x axis. The plot is used to detect non-linearity, unequal error variances, and outliers. Here we see that linearity holds reasonably well, as the red line is close to the dashed line and there does not apear a distinctive pattern
+
+#### - The normal probability plot (Normal Q-Q): shows if residuals are normally distributed. This plot looks pretty good as each point falls pretty close to the line but there is one point pretty far from the line. There are a couple of outliers (377, 672, 9920)
+
+#### - Spread-Location plot: shows if residuals are spread equally along the ranges of predictors. It’s used to check the assumption of equal variance (homoscedasticity). Here the residuals appear randomly spread.
+
+#### - Residuals vs. Leverage plots: helps identify influential data points in the model by looking for cases outside of a dashed line (eg:Cook’s distance). We’re looking for values in the upper right or lower right corners, which are outside Cook’s distance line. Such points would be influential in the model and removing them would likely noticeably alter the regression results. In this case, there are no outliers ouside of cook’s distance.

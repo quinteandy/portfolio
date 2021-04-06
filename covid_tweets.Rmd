@@ -1,0 +1,916 @@
+---
+title: "COVID-19 Twitter Sentiment Analysis"
+date: "December 14, 2020"
+output:
+  html_document:
+    df_print: paged
+    code_folding: hide
+    toc: true
+---
+
+## Project Objective
+
+###### The goal of this project is to do a senetiment analyses of COVID-19 tweets and to also analyze the sentime across region. 
+
+
+#### Introduction
+
+###### The first confirmed case of the Novel Coronavirus (COVID-19) in the United States was January 21, 2020. Since than there has been 16,756,581 confirmed cases and a total of 306,427 thousand people have died according to the CDC [1](https://covid.cdc.gov/covid-data-tracker/#cases_casesper100klast7days). The first COVID-19 vaccine was approved by the FDA on Friday December 11, 2020 [2](https://www.fda.gov/news-events/press-announcements/fda-takes-key-action-fight-against-covid-19-issuing-emergency-use-authorization-first-covid-19). As the vaccines are starting to arrive to different locations throughout the United States and the world, I wanted to do an analysis of what people are saying and feeling in regards to COVID-19.
+
+
+#### Data Collection
+
+###### The data was gathered by leveraging the Twitter developer account to download and collect various datasets. I also use the rtweet package to collect the data. There was two accounts used to download tweets such as @coronaviruscare and @oxfordvacgroup all related to COVID19 and the vaccine. We also leverage the Twitter platform to download tweets using two different hashtags (#COVID19 and #COVID19Vaccine). The final dataset contains 48,589 tweets × 10 variables.
+
+
+###### Common Libraries Used
+
+```{r, message=FALSE, warning=FALSE }
+# twitter library 
+library(rtweet)
+# plotting and pipes - tidyverse
+library(ggplot2)
+library(dplyr, warn.conflicts = FALSE)
+options(dplyr.summarise.inform = FALSE) 
+# text mining library
+suppressPackageStartupMessages(library(tidyverse)) 
+# date/time libaray
+library(lubridate, warn.conflicts = FALSE)
+# twitter library 
+library(rtweet)
+#Twitter Screenshot
+library(tweetrmd)
+# text mining library
+suppressPackageStartupMessages(library(tidyverse)) # suppress startup message
+library(tidytext)
+# stemming libary
+library(SnowballC)
+# lemmatization
+library(textstem)
+library(plotrix)
+library(radarchart)
+library(choroplethr)
+library(choroplethrMaps)
+library(reshape2)
+library(wordcloud)
+library(ggraph)
+```
+
+
+###### Load Datasets
+
+```{r}
+df = read_twitter_csv("final_tweets.csv")
+
+# Sources: [3](https://www.rdocumentation.org/packages/countrycode/versions/0.6/topics/countrycode)
+data(country.regions) # dataset that contains country names in different versions from choroplethr
+countryname<-as.data.frame(country.regions) #convert it as a dataframe
+
+sprintf('dataset now has %s rows and %s columns', nrow(df), ncol(df))
+```
+
+## Data Preparation
+
+##### Data Transformation
+
+###### - 1) We are going to convert the date field to a datetime for better use and for plotting.
+###### - 2) Factors are used to represent categorical data. Factors can be ordered or unordered and are an important class for statistical analysis. Therefore, we are going to convert Status id, Screen Name, Country Code, #'s and Expanded URL into factors.
+###### - 3) The column name reply count is labeled as logical and it has some NA's. We are going to change it to integers and we are going to put a 0 for the NA's. This will help us to do a better analysis.
+###### - 4) We are going to add a document ID for each row.
+###### - 5) Since text is labeled as "character" because it contains words, we are going to add a column name text_lenght to do some statistical analysis in regards to our tweets ("text").
+
+
+```{r}
+# Convert the date field to a datetime
+df$created_at <- as_datetime(df$created_at)
+
+#Changed some fields to factors for easier manipulation later
+df$status_id <- as.factor(df$status_id)
+df$screen_name <- as.factor(df$screen_name)
+df$country_code <- as.factor(df$country_code)
+df$hashtags <- as.factor(df$hashtags)
+df$urls_expanded_url <- as.factor(df$urls_expanded_url)
+
+# Fix up the reply count field.  It should be a int and NAs set to 0
+df$reply_count[is.na(df$reply_count)] <- 0
+df$reply_count <- as.integer(df$reply_count)
+
+# add document id
+df = df %>%
+  mutate(doc_id = paste0("doc", row_number())) %>%
+  select(doc_id, everything())
+
+# add text len
+df = df %>%
+  mutate(text_len = str_count(text))
+```
+
+
+###### After our transformation above we are going to check our results by looking at the structure of our dataset and to confirme that our dataset was properly transform. 
+###### First, we are going to create another dataframe with only the variables that we need since our original dataset has 92 variables. The following variables are the ones we are going to keep in our new dataframe:
+
+###### -1) Doc Id = is the number of each tweet
+###### -2) Status Id = this variable is going to help us to pull the actual tweet from Twitter through R.
+###### -3) Created At = the date of our tweets
+###### -4) Screenname = the name of the person that tweeted
+###### -5) Text = the actual tweet
+###### -6) Retweet Count = how many times was a tweet retweeted
+###### -7) Hashtags 
+###### -8) Text length = the lenght of each tweet
+###### -9) Favourite Count (Favorite) = the number of favorites tweets a specific tweet has received
+###### -10) Country Code = location of the tweet
+
+
+```{r}
+df1 <- df %>% 
+  select(doc_id, status_id, created_at, screen_name, text, retweet_count, hashtags, text_len, favourites_count, country_code)
+```
+
+###### Structure of our Dataframe
+
+```{r}
+str(df1)
+```
+
+###### After looking at the structure of our dataset we can learn that ur dataset has 48,589 and 10 variables.
+
+##### Looking at the top rows
+
+
+```{r}
+head(df1)
+```
+
+###### Looking at the first 6 rows we can see that we have tweets in regards to COVID-19 but more specifically COVID-19 vaccines and PPE's as well.
+
+##### Looking at the bottom rows.
+
+```{r}
+tail(df1)
+```
+
+###### Since our dataset contains 49,473 tweets, we are going to see how many duplicates we have.
+
+```{r}
+duplicates <- df1[duplicated(df1$text),]
+sprintf('number of duplicate text values %d', nrow(duplicates))
+```
+
+###### We have 884 duplicates. Let's take a look at those tweets more closely so we can get a better sense of what those duplicates are.
+
+```{r}
+duplicates
+```
+
+##### We are going to drop the duplicates as we don't need them in our analysis.
+
+```{r}
+df1 <-  df1[!duplicated(df1$text),]
+sprintf('number of unique text values %d', nrow(df1))
+
+```
+
+###### After dropping our duplicate tweets we now have 48,589 tweets.
+
+##### We are now going to check to see if we have any outliers in our dataset. An outlier is a data point that differs significantly from other observations.
+
+```{r}
+summary(df1$text_len)
+```
+
+##### From our statistic above we can see that we have a negative skewed as our mean is less than our median. We also see that we might have an outlier as the max is 959 characters. Let's plot it below to learn more.
+
+```{r}
+boxplot(df1$text_len, 
+        ylab = "text_len")
+```
+
+###### Using Box-plot is a great way to determine if we have outliers. It looks like we might do but let's take a look at the actual tweets to determine why some tweets have some many characters. 
+
+```{r}
+out <- boxplot.stats(df1$text_len)$out
+
+out_ind <- which(df1$text_len %in% c(out))
+outliers <- df1[out_ind, ]
+
+outliers %>%
+  select(doc_id, text_len, screen_name, status_id)  %>%
+  arrange(-text_len)
+```
+
+##### Let's analyze the first two tweets.
+
+```{r}
+df1 %>%
+  filter(doc_id  %in%  c('doc1974')) %>%
+  select(doc_id, text)  %>%
+  c()    
+```
+
+###### The reason why the tweet is so long is because it contains a lot of mentions. Also looking at the actual tweet I determined that it is better to keep it as it can contain useful information for our sentiment analysis later on.
+
+
+##### Printing the actual tweet
+
+```{r, message=FALSE, warning=FALSE}
+#[4](https://github.com/gadenbuie/tweetrmd)
+include_tweet("https://twitter.com/ang__johnson/status/1337015660136833027")
+```
+
+##### How about the second longest tweet?
+
+```{r}
+df1 %>%
+  filter(doc_id  %in%  c('doc32363')) %>%
+  select(doc_id, text)  %>%
+  c() 
+```
+
+###### Again, the second longest tweet contains a lot of mentions therefore the lenght of our tweet is really long but the actual tweet will be beneficial for our sentiment analysis.
+
+##### How about the second longest tweet?
+
+```{r, message=FALSE, warning=FALSE}
+include_tweet("https://twitter.com/CupofJoeintheD2/status/1336801360461881346")
+
+```
+
+
+###### Using an R dataset that has country codes in it, I'm going to merge the country code with our dataset as it will help us to do a better analysis by countries.
+
+
+```{r, message=FALSE, warning=FALSE}
+countries_data <- df1 %>% 
+  filter(is.na(country_code) ==FALSE) %>% 
+  rename(iso2c = country_code) %>% 
+  left_join(countryname) %>% 
+  count(region,sort = TRUE) %>%
+  rename(value = n) %>% 
+  select(region, value) 
+countries_data
+```
+
+
+##### How many locations are represented in our dataset?
+
+```{r}
+length(unique(df1$country_code))
+```
+
+###### We have 60 locations represented in our dataset. 
+
+##### Lets take a look at the top 10.
+
+```{r}
+df1 %>%
+  count(country_code, sort = TRUE)  %>%               
+  mutate(country_code = reorder(country_code, n))  %>%    
+  slice_max( order_by=country_code, n = 10) %>%       
+  ggplot(aes(x = country_code, y = n)) +
+  geom_col(aes(fill = country_code)) +
+  geom_text(aes(label = n, hjust=1), size = 3.5, color = "black") +
+  coord_flip() +
+      labs(x = "Location",
+      y = "Count") +
+  ggtitle("Top Locations") +
+  theme(plot.title = element_text(size = 14, face = "bold",hjust = 0.5))
+```
+
+
+###### Our top location are US, UK, and Canada
+
+
+##### Visualize Tweets by Country
+
+```{r, message=FALSE, warning=FALSE}
+#[5](https://www.r-bloggers.com/2017/03/advanced-choroplethr-changing-color-scheme-2/)
+labs <- data.frame(region =tail(countries_data[order(countries_data$value),])$region) 
+                   
+# Left joining by region with our original dataset
+nplotdata <- countries_data %>% left_join(labs)
+
+# Visualise Map
+country_choropleth(countries_data, num_colors  = 1) + 
+  scale_fill_gradient(high = "#e34a33", low = "#fee8c8", #set color by stats
+                      guide ="colorbar", na.value="white", name="Counts of Tweets") + 
+  ggtitle("Tweets by Country") +
+  theme(plot.title = element_text(size = 14, face = "bold",hjust = 0.5)) 
+  
+```
+
+
+## EDA
+
+##### Statistics Analysis
+
+```{r}
+summary(df1)
+```
+
+##### From our statistics analysis above learned the following:
+
+###### 1) One tweet is from 11/14/2019 and our last tweet is from 12/10/2020
+###### 2) We can see that one user has 1087 tweets
+###### 3) The Top #'s is COVID19
+###### 4) Most of our users are from the US, Great Britain and Canada
+###### 5) The shortest tweet we have contains 14 characters. The average length of our is 207 characters and the longest tweet has 959 characters.
+
+
+##### What day of the week produced the most tweet?
+
+```{r}
+ggplot(data = df1, aes(x = wday(created_at, label = TRUE))) +
+ geom_bar(aes(fill = ..count..)) +
+ xlab('Day of the week') + ylab('Number of tweets') + 
+ theme_minimal() +
+ scale_fill_gradient(low = 'orange', high = 'blue') +
+  ggtitle("Day Of The Week With The Most Tweets in The World") +
+  theme(plot.title = element_text(size = 14, face = "bold",hjust = 0.5))
+```
+
+###### Most of the tweets in the world were on Wednesday.
+
+
+##### How about in the US?
+
+```{r}
+df1 %>%
+  filter(country_code == 'US' & is.na(country_code) == F) %>% 
+  ggplot(aes(x = wday(created_at, label = TRUE))) +
+  geom_bar(aes(fill = ..count..)) +
+  xlab('Day of the week') + ylab('Number of tweets') + 
+  theme_minimal() +
+  scale_fill_gradient(low = 'orange', high = 'blue') +
+  ggtitle("Day Of The Week With The Most Tweets in the US") +
+  theme(plot.title = element_text(size = 14, face = "bold",hjust = 0.5))
+```
+
+###### Most of the tweets in the US were on Wednesday.
+
+
+##### Who are our top users?
+
+```{r}
+df1 %>%
+  count(screen_name, sort = TRUE)  %>%               
+  mutate(screen_name = reorder(screen_name, n))  %>%    
+  slice_max( order_by=screen_name, n = 10) %>%      
+  ggplot(aes(x = screen_name, y = n)) +
+  geom_col(aes(fill = screen_name)) +
+  geom_text(aes(label = n, hjust=1), size = 3.5, color = "black") +
+  coord_flip() +
+  labs(x = "Users",
+      y = "Count") +
+  ggtitle("Top Users") +
+  theme(plot.title = element_text(size = 14, face = "bold",hjust = 0.5))
+```
+
+
+###### Our top users coronaviruscare has tweeted 1,087 times.
+
+
+##### What are our top 5 favoite tweeter saying worldwide?
+
+```{r, message=FALSE, warning=FALSE}
+favorite<- df1 %>%
+  arrange(desc(favourites_count)) %>% 
+  select(created_at, screen_name, status_id ,text,favourites_count) %>% 
+  top_n(5)
+
+favorite
+```
+
+##### Let's pull the actual tweet
+
+```{r, message=FALSE, warning=FALSE}
+include_tweet("https://twitter.com/CrankyCyborg/status/1337123816472936449")
+
+```
+
+###### The most favorite tweet in the world tweeted in regards to President Trump Lawyer Rudy Giuliani getting a special treatment to battle COVID-19.
+
+
+##### What's our favorite tweet in the us?
+
+```{r, message=FALSE, warning=FALSE}
+favorite_us <- df1 %>%
+  filter(country_code == 'US' & is.na(country_code) == FALSE) %>% 
+  arrange(desc(favourites_count)) %>% 
+  select(screen_name, status_id,text,favourites_count) %>% 
+  top_n(5)
+
+favorite_us
+```
+
+##### Let's pull the actual tweet
+
+```{r, message=FALSE, warning=FALSE}
+include_tweet("https://twitter.com/shortwave8669/status/1336686146542301190")
+
+```
+
+###### The most favorite tweet in the us tweeted a statistics in regards to the new cases deaths as of December 9, 2020.
+
+
+##### What are our top 20 World Retweeted Tweets?
+
+
+```{r, message=FALSE, warning=FALSE}
+retweeted<- df1 %>%
+  arrange(desc(retweet_count)) %>%
+  select(screen_name, created_at, status_id,text,retweet_count)
+retweeted
+```
+
+
+##### Let's do a timeline to see when did our world retweeted the most in a weekly basis?
+
+```{r, message=FALSE, warning=FALSE}
+#[6](https://medium.com/@traffordDataLab/exploring-tweets-in-r-54f6011a193d)
+ts_plot(retweeted, "weekly") +
+  labs(x = NULL, y = NULL,
+       title = "Frequency of Weekly Retweets in the World",
+       subtitle = paste0(format(min(retweeted$created_at), "%d %B %Y"), " to ", format(max(retweeted$created_at),"%d %B %Y"))) +
+  scale_y_log10() +
+  theme_minimal()
+```
+
+
+###### We can see that during the first wave of the virus which was March to May there was a high people retweeting about COVID-19. There is a high volume of people retweeting in December and that's for two reasons. One, the spike of virus that we are currently seeing and also the roll out of the vaccine has people retweeting the most about Covid-19.
+
+
+#### Let's take a look at the most retweet tweet in the world.
+
+```{r, message=FALSE, warning=FALSE}
+include_tweet("https://twitter.com/coronaviruscare/status/1243603938676486146")
+
+```
+
+###### Our most retweeted tweets are from President Obama. There is no suprised that President Obama's tweet was our most retweeted tweet as President Obama has the most followers in Twitter.
+
+
+##### What are our top 20 US Retweeted Tweets?
+
+```{r, message=FALSE, warning=FALSE}
+retweeted_us<-df1 %>%
+  filter(country_code == 'US' & is.na(country_code) == FALSE) %>%
+  arrange(desc(retweet_count)) %>%
+  select(screen_name, created_at, status_id, text,retweet_count)
+retweeted_us
+```
+
+
+##### Let's do a timeline to see when the US retweeted the most in an hourly basis?
+
+```{r, message=FALSE, warning=FALSE}
+ts_plot(retweeted_us, "hourly") +
+  labs(x = NULL, y = NULL,
+       title = "Frequency of US Retweets in an hour",
+       subtitle = paste0(format(min(retweeted_us$created_at), "%d %B %Y"), " to ", format(max(retweeted_us$created_at),"%d %B %Y"))) +
+  scale_y_log10()+
+  theme_minimal()
+```
+
+
+###### We can see that in an hourly basis that between December 8th and December 10th we have the most retweets in the US. The reason for that spike between those days is in regards to the roll out of the Vaccine in the US for COVID-19.
+
+
+##### What are the top 7 #'s in the world?
+
+
+```{r fig.height= 6, fig.width=14}
+
+# Top #'s
+df1 %>%
+  count(hashtags , sort = TRUE)  %>%               
+  mutate(hashtags  = reorder(hashtags , n))  %>%   
+  slice_max( order_by=hashtags , n = 7) %>%       
+  ggplot(aes(x = hashtags , y = n)) +
+  geom_bar(stat = 'identity', aes(fill = hashtags)) +
+  geom_text(aes(label=n), position=position_dodge(width=0.9), vjust=-0.25)+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(legend.position="none") +
+      labs(x = "Hashtags",
+      y = "Count ") +
+  ggtitle("Top Hashtag in the World") +
+  theme(legend.position = 'none', plot.title = element_text(size=18, face = 'bold'),
+              axis.text=element_text(size=12),
+              axis.title=element_text(size=16,face="bold"))
+
+
+```
+
+##### What are the top 7 #'s in the US?
+
+```{r, fig.height=6, fig.width=14}
+df1 %>%
+  filter(country_code == 'US' & is.na(country_code) == F) %>% 
+  count(hashtags , sort = TRUE)  %>%               
+  mutate(hashtags  = reorder(hashtags , n))  %>%    
+  slice_max( order_by=hashtags , n = 7) %>%       
+  ggplot(aes(x = hashtags , y = n)) +
+  geom_bar(stat = 'identity', aes(fill = hashtags)) +
+  geom_text(aes(label=n), position=position_dodge(width=0.9), vjust=-0.25)+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(legend.position="none") +
+      labs(x = "Hashtags",
+      y = "Count ") +
+  ggtitle("Top Hashtag in The US") +
+  theme(legend.position = 'none', plot.title = element_text(size=18, face = 'bold'),
+              axis.text=element_text(size=12),
+              axis.title=element_text(size=16,face="bold"))
+```
+
+###### Our top # in the world and in the US is #COVID19
+
+
+
+## Text Analysis of Tweets using Tidytext
+
+##### We are going to be performing text mining techniques to find out the following:
+
+###### 1) Count of unique words in tweets in the World and in the US
+###### 2) Sentiment Analysis in the World and in the US
+###### 3) Top Bigrams
+
+
+##### Preprocessing 
+
+###### Tidy so that the text is in a tidy format with one word per row and also perform text preprocessing 
+
+###### 1) We first and going to remove URLs, numbers, white space
+###### 2) For sentiment analysis we are going to use lemmatize technique
+###### 3) We are also going unnest_tokens() for creating a tidy format which it will automatically converts to lowercase. 
+###### 4) An advantage of tidytext is that it also removes punctuation automatically
+
+```{r}
+#[7](https://www.red-gate.com/simple-talk/sql/bi/text-mining-and-sentiment-analysis-with-r/)
+cleandf = df1[-grep("http\\S+\\s*", df1$text),]           
+cleandf = cleandf[-grep("\\b\\d+\\b", cleandf$text),]   
+cleandf = cleandf[-grep('t.co',  cleandf$text),]    
+cleandf = cleandf[-grep('amp',  cleandf$text),]
+
+
+my_stop_words <- tibble(
+  word = c( "t.co",  "rt",  "amp", "gt", "shit", "damm", "wow", "fuck", "fucker", "covid19vaccine", "positive", "trump", "william",	"shakespeare"),
+  lexicon = "twitter"
+)
+all_stop_words <- stop_words %>%
+  bind_rows(my_stop_words)
+
+
+# tidying and remove stop words
+tidy_df = cleandf %>%
+    unnest_tokens(word, text) %>%             
+  anti_join(all_stop_words, by='word') %>%                  
+  mutate(word = lemmatize_words(word))        
+
+tidy_df$word <- gsub("\\s+","", tidy_df$word)     
+
+tidy_df
+```
+
+##### What are the words mentioned the most in the world?
+
+```{r, message=FALSE, warning=FALSE}
+frequency_global <- tidy_df %>% 
+count(word, sort=TRUE) 
+
+#get the top 10 words
+frequency_global %>%
+  top_n(10)
+```
+
+
+```{r}
+#[7](https://www.red-gate.com/simple-talk/sql/bi/text-mining-and-sentiment-analysis-with-r/)
+frequency_global[1:10,] %>% 
+  ggplot(aes(x = word, y = n)) +
+  geom_col(aes(x = reorder(word, n) ,n, fill= word)) + 
+  geom_text(aes(label = n, hjust=1), size = 3.5, color = "black") +
+  coord_flip() +
+  ggplot2::labs(
+    x = "Word", 
+    y = NULL) +
+  ggtitle("Word Freq in the World") + 
+  theme(plot.title = element_text(size = 14, face = "bold",hjust = 0.5))
+
+```
+
+###### The word that was mentioned the most in the World was Covid19 and Vaccine.
+
+
+##### What are the words mentioned the most in the US?
+
+```{r, message=FALSE, warning=FALSE}
+
+tidy_us <- tidy_df[is.na(tidy_df$country_code)==FALSE & tidy_df$country_code == "US", ]
+
+frequency_us <- tidy_us %>% 
+  count(word, sort=TRUE)
+
+#top 10 words
+frequency_us %>%
+  top_n(10)
+```
+
+
+```{r}
+frequency_us[1:10,] %>% 
+  ggplot(aes(x = word, y = n)) +
+  geom_col(aes(x = reorder(word, n) ,n, fill= word)) + 
+  geom_text(aes(label = n, hjust=1), size = 3.5, color = "black") +
+  coord_flip() +
+  ggplot2::labs(
+    x = "Word", 
+    y = NULL) +
+  ggtitle("Word Freq in the US") + 
+  theme(plot.title = element_text(size = 14, face = "bold",hjust = 0.5))
+
+```
+
+###### The word that was mentioned the most in the US was Covid-19 and Vaccine as well. When Comparing the most frequent word that the world and the US mentioned the most the top 4 were the same but the last 6 words were different.
+
+
+#### What's the sentiment worldwide using Bing?
+
+```{r, message=FALSE, warning=FALSE}
+#[8](https://www.tutorialspoint.com/r/r_pie_charts.htm)
+tweets_bing<-tidy_df%>% 
+  # Implement sentiment analysis using the "bing" lexicon
+  inner_join(get_sentiments("bing")) 
+
+perc<-tweets_bing%>% 
+  count(sentiment)%>% 
+  mutate(total=sum(n)) %>% 
+  group_by(sentiment) %>% 
+  mutate(percent=round(n/total,2)*100) %>% 
+  ungroup()
+
+label <-c( paste(perc$percent[1],'%',' - ',perc$sentiment[1],sep=''),
+     paste(perc$percent[2],'%',' - ',perc$sentiment[2],sep=''))
+
+pie3D(perc$percent,labels=label,labelcex=1.1,explode= 0.1, 
+      main="Worldwide Sentiment") 
+```
+
+##### 62% of the sentiment worldwide are negative.
+
+
+##### What are the most common Positive and Negative words in the World?
+
+```{r, message=FALSE, warning=FALSE}
+#[9]https://www.tidytextmining.com/twitter.html#comparing-word-usage
+top_words <- tweets_bing %>%
+  count(word, sentiment) %>%
+  group_by(sentiment) %>% 
+  top_n(10) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, n))
+
+#plot the result
+ggplot(top_words, aes(word, n, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = n, hjust=1), size = 3.5, color = "black") +
+  facet_wrap(~sentiment, scales = "free") +  
+  coord_flip() +
+  ggtitle("Most Common Positive and Negative words (World)") + 
+  theme(plot.title = element_text(size = 14, face = "bold",hjust = 0.5))
+```
+
+###### The most negative words mentioned in the world are Virus, Death, and Die.
+###### The most positive word in the US are safe, patient, and approve.
+
+
+###### Wordcloud for comparing our most positive and negative words.
+
+```{r, message=FALSE, warning=FALSE}
+#[10](https://www.tidytextmining.com/twitter.html#comparing-word-usage)
+
+tidy_df %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("#1b2a49", "#00909e"),
+                   max.words = 100)
+```
+
+##### What are the most common Positive and Negative words in the US?
+
+```{r, message=FALSE, warning=FALSE}
+top_words_us <- tidy_us %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment) %>%
+  group_by(sentiment) %>%
+  top_n(10) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, n))
+
+#plot the result above
+ggplot(top_words_us, aes(word, n, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = n, hjust=1), size = 3.5, color = "black") +
+  facet_wrap(~sentiment, scales = "free") +  
+  coord_flip() +
+  ggtitle("Most common positive and negative words (US)") + 
+  theme(plot.title = element_text(size = 14, face = "bold",hjust = 0.5)) 
+```
+
+###### The most negative words mentioned in the us are death, restriction, poor and lie.
+###### The most positive word in the US are positive, patient, safe and love.
+
+#### NRC Emotional Lexicon
+
+#### Analyzing the emotions of our tweets in the World
+
+```{r}
+#Sentiment ranking list
+nrc_words <- tidy_df %>%
+  inner_join(get_sentiments("nrc"), by = "word") %>% 
+  filter(!sentiment %in% c("positive", "negative")) %>% 
+  count(sentiment,sort = TRUE) %>% 
+  mutate(percent=round(100*n/sum(n))) %>%
+  select(sentiment, percent)
+
+nrc_words
+```
+
+#### Visualizing the emotions of our tweets in the US
+
+```{r}
+nrc_words %>% 
+  ggplot(aes(x = sentiment, y = percent)) +
+  geom_col(aes(x = reorder(sentiment, percent) ,percent, fill= sentiment)) + 
+  geom_text(aes(label = percent, hjust=1), size = 3.5, color = "black") +
+  coord_flip() +
+  ggplot2::labs(
+    x = "Sentiment", 
+    y = " Percentage % ") +
+  ggtitle("Emotions of Tweets in the World") + 
+  theme(plot.title = element_text(size = 14, face = "bold",hjust = 0.5))
+
+```
+
+##### People primarily express trust, fear, anticipation and sadness in their tweets.
+
+
+##### Word Frequency within each NRC Sentiment in the World
+
+```{r, message=FALSE, warning=FALSE}
+tidy_df %>%
+  inner_join(get_sentiments("nrc")) %>%
+  filter(!sentiment %in% c("positive", "negative")) %>%
+  count(word,sentiment) %>% 
+  group_by(sentiment) %>%
+  top_n(5) %>% 
+  ungroup() %>%
+  mutate(word=reorder(word,n)) %>% 
+  ggplot(aes(x=word,y=n,fill=sentiment)) +
+    geom_col(show.legend = FALSE) +
+    facet_wrap(~ sentiment, scales = "free") +
+    coord_flip() +
+  ggtitle(label = "Sentiment Word Frequency (World)") + 
+  theme(plot.title = element_text(size = 14, face = "bold",hjust = 0.5))
+```
+
+######  The pandemic caused the most sadness in the world.
+
+#### Analyzing the emotions of our tweets in the US
+
+```{r}
+#Sentiment ranking list
+nrc_words_us <- tidy_us %>%
+  inner_join(get_sentiments("nrc"), by = "word") %>% 
+  filter(!sentiment %in% c("positive", "negative")) %>% 
+  count(sentiment,sort = TRUE) %>% 
+  mutate(percent=round(100*n/sum(n))) %>%
+  select(sentiment, percent)
+
+nrc_words_us
+```
+
+#### Visualizing the emotions of our tweets in the US
+
+```{r}
+nrc_words_us %>% 
+  ggplot(aes(x = sentiment, y = percent)) +
+  geom_col(aes(x = reorder(sentiment, percent) ,percent, fill= sentiment)) + 
+  geom_text(aes(label = percent, hjust=1), size = 3.5, color = "black") +
+  coord_flip() +
+  ggplot2::labs(
+    x = "Sentiment", 
+    y = " Percentage % ") +
+  ggtitle("Emotions of Tweets in the US") + 
+  theme(plot.title = element_text(size = 14, face = "bold",hjust = 0.5))
+
+```
+
+##### Users from the US primarily express trust, anticipation and sadness in their tweets.
+
+##### Word Frequency within each NRC Sentiment in the US
+
+```{r, message=FALSE, warning=FALSE}
+tidy_us %>%
+  inner_join(get_sentiments("nrc")) %>%
+  filter(!sentiment %in% c("positive", "negative")) %>%
+  count(word,sentiment) %>% 
+  group_by(sentiment) %>%
+  top_n(5) %>% 
+  ungroup() %>%
+  mutate(word=reorder(word,n)) %>% 
+  ggplot(aes(x=word,y=n,fill=sentiment)) +
+    geom_col(show.legend = FALSE) +
+    facet_wrap(~ sentiment, scales = "free") +
+    coord_flip() + 
+  ggtitle(label = "Sentiment Word Frequency (US)") + 
+  theme(plot.title = element_text(size = 14, face = "bold",hjust = 0.5))
+```
+
+##### Disgust in regards to death cauased the most within the US. Pandemic and death caused the most sadness in the US as well. 
+
+
+##### 3) Relationships between words using Bigrams
+
+###### A bigram or digram is a sequence of two adjacent elements from a string of tokens, which are typically letters, syllables, or words. A bigram is an n-gram for n=2.
+
+```{r}
+bigrams_1 <- tidy_df %>%
+  unnest_tokens(bigram, word, token = "ngrams", n=2)
+
+bigrams_1
+```
+
+
+##### We are going to analyze the most common bigrams
+
+
+```{r}
+bigrams_separated <- bigrams_1 %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+bigrams_filtered <- bigrams_separated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word) %>% 
+  filter(!(is.na(word1) | is.na(word2))) %>% 
+  count(word1, word2, sort = TRUE) %>% 
+  head(15)
+
+bigrams_filtered
+```
+
+###### The most common bigrams are Covid-19 vaccine, wear mask, covid19 pandemic.
+
+##### Visualize the Top 15 Bigrams
+
+```{r wordcors, dependson = "word_cors", fig.height = 6, fig.width = 12,}
+#[11](https://bookdown.org/Maxine/tidy-text-mining/tokenizing-by-n-gram.html)
+
+arrow <- grid::arrow(type = "closed", length = unit(.15, "inches"))
+
+ggraph(bigrams_filtered, layout = "fr") + 
+  geom_edge_link(aes(alpha = n), show.legend = FALSE, 
+                 arrow = arrow, end_cap = circle(0.07, "inches")) + 
+  geom_node_point(color = "lightblue", size = 5) + 
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  ggtitle("Top 15 Bigrams") +
+  theme(plot.title = element_text(size = 14, face = "bold",hjust = 0.5))
+```
+
+##### From the Bigram above all words connect with each other properly. We can words such as allergic reaction, social distance, healthcare worker and wear mask.
+
+
+
+## Conclusion
+
+##### -Overall, the tweets convey a moderately a negative sentiment, with 62% of tweets contents marked as negative. 
+
+##### -The most frequent words are related to Covid019 and the Coronavirus vaccines.
+
+##### -Trust, anticipation, and sadness caused the most sentiment in the US when using the NRC sentiment. The word "wear" and "save" had the most were mentioned the most within the trust sentiment. Those words have to be in regards people wearing the face mask and also the roll of the vaccine that will save people lifes. 
+
+##### -The tweets that convey an optimistic sentiment had high frequency of words such as safe, patient, and approve. This sentiments are more in regards to the vaccine.
+
+##### -Looking at the emotional analysis we can see that Covid-19 has caused a lot sadness around the world. Covid-19 deaths has made people feel sad, surprise, disgust, anticipated and anger around the world.
+
+##### -In the US there is a lot of trust and anticipation in regards to Covid-19. Also the word save was the most common across the sentiment joy and trust and I thinks that's more towards the sentiment of the vaccine. People are hoping that this will save people lives.
+
+
+
+## References: 
+#### 1) https://covid.cdc.gov/covid-data-tracker/#cases_casesper100klast7days
+#### 2) https://www.fda.gov/news-events/press-announcements/fda-takes-key-action-fight-against-covid-19-issuing-emergency-use-authorization-first-covid-19
+#### 3) https://www.rdocumentation.org/packages/countrycode/versions/0.6/topics/countrycode
+#### 4) https://github.com/gadenbuie/tweetrmd
+#### 5)https://www.r-bloggers.com/2017/03/advanced-choroplethr-changing-color-scheme-2/
+#### 6) https://medium.com/@traffordDataLab/exploring-tweets-in-r-54f6011a193d
+#### 7) https://www.tidytextmining.com/sentiment.html
+#### 8) https://www.tutorialspoint.com/r/r_pie_charts.htm
+#### 9) https://towardsdatascience.com/how-did-twitter-react-to-the-coronavirus-pandemic-2857592b449a
+#### 10) https://www.tidytextmining.com/twitter.html#comparing-word-usage
+#### 11) https://bookdown.org/Maxine/tidy-text-mining/tokenizing-by-n-gram.html
+
+
+
+
