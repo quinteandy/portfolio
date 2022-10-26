@@ -1,6 +1,6 @@
 # Andy Quintero Portfolio
 
-This repository containes my data science projects completed by me for academic, self learning, and hobby purposes. Presented in the form of Python (Jupiter Notebooks), and R markdown files.
+This repository containes my data science projects completed by me for academic, self learning, and hobby purposes. Presented in the form of Python (Jupiter Notebooks), and R studio notebooks.
 
 
 [Prediction of Airbnb Prices](https://github.com/quinteandy/portfolio/blob/main/Airbnb_Capstone.ipynb)   
