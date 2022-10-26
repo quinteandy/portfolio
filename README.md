@@ -6,7 +6,7 @@ This repository containes my data science projects completed by me for academic,
 [Prediction of Airbnb Prices](https://github.com/quinteandy/portfolio/blob/main/Airbnb_Capstone.ipynb)   
  - This project aims to explore Airbnb listing data, to help Airbnb hosts maximize their earnings. Specifically, we used machine learning to predict the base price for properties in Seattle, San Francisco, and Los Angeles. Technologies used: Python
 
-[Sentiment Analysis of Airbnb]
+[Sentiment Analysis of Airbnb](https://github.com/quinteandy/portfolio/blob/main/Airbnb_Reviews.ipynb)
  - This project aims to explore Airbnb review data, to help Airbnb hosts maximize their earnings by reviewing the top complains in Seatle, San Francisco, and Los Angeles. Technologies used: Python
 
 [Sentiment Analysis for Amazon Reviews](https://github.com/quinteandy/portfolio/blob/main/Amazon_Consumer_Reviews.ipynb)
